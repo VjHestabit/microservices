@@ -2,10 +2,10 @@
 
 namespace App\Models;
 
-use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Hash;
 use Laravel\Sanctum\HasApiTokens;
 use Tymon\JWTAuth\Contracts\JWTSubject;
 
@@ -46,6 +46,13 @@ class User extends Authenticatable implements JWTSubject
         'email_verified_at' => 'datetime',
     ];
 
+    public function userDetail(){
+        return $this->hasOne(UserDetail::class,'user_id','id');
+    }
+
+    public function teacherData(){
+        return $this->hasMany(TeacherSubject::class,'user_id','id');
+    }
     public function getData(){
         return $this->hasOne(User::class,'id','assigned_to');
     }
@@ -58,5 +65,9 @@ class User extends Authenticatable implements JWTSubject
     public function getJWTCustomClaims()
     {
         return [];
+    }
+
+    public function setPasswordAttribute($value){
+        $this->attributes['password'] = Hash::make('password');
     }
 }

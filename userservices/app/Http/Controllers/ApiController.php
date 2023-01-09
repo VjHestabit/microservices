@@ -3,67 +3,46 @@
 namespace App\Http\Controllers;
 
 use App\Helpers\CustomHelper;
-use App\Models\TeacherSubject;
+use App\Http\Requests\AuthenticateRequest;
+use App\Http\Requests\AuthLoginRequest;
+use App\Http\Requests\UserRequest;
 use App\Models\User;
-use App\Models\UserDetail;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Validator;
 use Symfony\Component\HttpFoundation\Response;
 use Tymon\JWTAuth\Exceptions\JWTException;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 class ApiController extends Controller
 {
-    public function register(Request $request)
+    public function register(UserRequest $request)
     {
-    	//Validate data
-        $data = $request->all();
+        $data = $request->validated();
+        $user_data = $request->only(['role_id','first_name','last_name','email','password']);
+        $user = User::create($user_data);
+        if($request->hasFile('profile_picture')){
+            $user->profile_picture = CustomHelper::uploadImage($request->file('profile_picture'));
+            $user->save();
+        }
+        $user_detail_data = $request->except(['role_id','first_name','last_name','email','password']);
+        $user->userDetail()->create($user_detail_data);
 
-          //Request is valid, create new user
-          $userData['role_id'] = isset($data['role_id']) ? $data['role_id'] : '';
-          $userData['first_name'] = isset($data['first_name']) ? $data['first_name'] : '';
-          $userData['last_name'] = isset($data['last_name']) ? $data['last_name'] : '';
-          $userData['email'] = isset($data['email']) ? $data['email'] : '';
-          $userData['password'] = isset($data['password']) ? Hash::make($data['password']) : '';
-          if($request->hasFile('profile_picture')){
-              $file= $request->file('profile_picture');
-              $filename= date('YmdHi').$file->getClientOriginalName();
-              $file->move(public_path('uploads'), $filename);
-              $userData['profile_picture'] = $filename;
-          }
-          $userData['status'] = 2;
-          $user = User::create($userData);
+        if($request->has('subject_name') && count($request->input('subject_name')) > 0){
+            foreach($request->input('subject_name') as $key =>  $sub){
+                $subject['subject_name'] = $sub;
+                $user->teacherData()->create($subject);
+            }
+        }
+        return response()->json([
+            'success' => true,
+            'message' => 'User created successfully',
+            'data' => $user
+        ], Response::HTTP_OK);
 
-          $uDetails['user_id'] = $user->id;
-          $uDetails['address'] = isset($data['address']) ? $data['address'] : '';
-          $uDetails['current_school'] = isset($data['current_school']) ? $data['current_school'] : '';
-          $uDetails['previous_school'] = isset($data['previous_school']) ? $data['previous_school'] : '';
-          $uDetails['exp'] = isset($data['exp']) ? $data['exp'] : null;
-          $uDetails['father_name'] = isset($data['father_name']) ? $data['father_name'] : '';
-          $uDetails['mother_name'] = isset($data['mother_name']) ? $data['mother_name'] : '';
-          $uDetails['assigned_status'] = 2;
-          $userDetail = UserDetail::create($uDetails);
-          if(isset($data['subject_name']) && count($data['subject_name']) > 0){
-              $total_subs = count($data['subject_name']);
-              foreach($data['subject_name'] as $key =>  $sub){
-                  $tSubject['user_id'] = $user->id;
-                  $tSubject['subject_name'] = $sub;
-                  TeacherSubject::create($tSubject);
-              }
-          }
-          //User created, return success response
-          return response()->json([
-              'success' => true,
-              'message' => 'User created successfully',
-              'data' => $user
-          ], Response::HTTP_OK);
     }
 
-    public function authenticate(Request $request)
+    public function authenticate(AuthLoginRequest $request)
     {
-        $credentials = $request->only('email','password');
-        //Request is validated
+        $validate = $request->validated();
+        $credentials = $request->only(['email','password']);
         try {
             if (! $token = JWTAuth::attempt($credentials)) {
                 return response()->json([
@@ -78,8 +57,6 @@ class ApiController extends Controller
                 	'message' => 'Could not create token.',
                 ], 500);
         }
-
- 		//Token created, return with success response and jwt token
         return response()->json([
             'success' => true,
             'message' => "User Logged In Successfully",
@@ -87,19 +64,9 @@ class ApiController extends Controller
         ]);
     }
 
-    public function logout(Request $request)
+    public function logout(AuthenticateRequest $request)
     {
-        //valid credential
-        $validator = Validator::make($request->only('token'), [
-            'token' => 'required'
-        ]);
-
-        //Send failed response if request is not valid
-        if ($validator->fails()) {
-            return response()->json(['error' => $validator], 200);
-        }
-
-		//Request is validated, do logout
+        $validate = $request->validated();
         try {
             JWTAuth::invalidate($request->token);
 
@@ -115,94 +82,59 @@ class ApiController extends Controller
         }
     }
 
-    public function get_user(Request $request)
+    public function get_user(AuthenticateRequest $request)
     {
-        $this->validate($request, [
-            'token' => 'required'
-        ]);
-
-        $user = JWTAuth::authenticate($request->token);
-        $user['role_id'] = CustomHelper::$userType[$user->role_id];
-        $userDetails = UserDetail::where('user_id',$user->id)->first();
-        $user['user_details'] = $userDetails;
-        $user['user_details']['assigned_status'] = CustomHelper::$studentStatus[$userDetails->assigned_status];
-        $user['user_details']['assigned_to'] = ($userDetails->assigned_to != "") ? User::where('id',$userDetails->assigned_to)->first() : '';
-        // echo "<pre>";
-        // print_r($user);
-        // die;
-        if(!$user && !$userDetails){
+        $token = $request->validated();
+        $authenticate = JWTAuth::authenticate($request->token);
+        $user = User::with(['userDetail.teacherDetail'])->where('id',$authenticate->id)->get();
+        if(!$user){
             return response()->json([
                 'success' => false,
                 'data' => array(),
                 'message' => "Failed To Fetched Data"
-            ],200);
+            ],Response::HTTP_NOT_FOUND);
         }
         return response()->json([
             'success' => true,
             'data' => $user,
             'message' => "Data Fetched Successfully"
-        ],200);
+        ],Response::HTTP_OK);
     }
 
-    public function update_user(Request $request){
-        $data = $request->all();
+    public function update_user(UserRequest $request){
+        $validate = $request->validated();
 
         $user = JWTAuth::authenticate($request->token);
-        $validator2 = Validator::make($request->all(), [
-            'email' => 'required', 'string', 'email', 'max:255','unique:users,email,'.$user->id.',id',
-        ]);
-
-        if ($validator2->fails()) {
-            return response()->json([
-                'status' => false,
-                'message' => $validator2
-            ], 200);
-        }
-        $userData['first_name'] = isset($data['first_name']) ? $data['first_name'] : '';
-        $userData['last_name'] = isset($data['last_name']) ? $data['last_name'] : '';
-        $userData['email'] = isset($data['email']) ? $data['email'] : '';
-        $userData['password'] = isset($data['password']) ? Hash::make($data['password']) : '';
+        $user_data = $request->only(['first_name','last_name','email']);
+        $userUpdate = User::find($user->id)->update($user_data);
         if($request->hasFile('profile_picture')){
-            $file= $request->file('profile_picture');
-            $filename= date('YmdHi').$file->getClientOriginalName();
-            $file->move(public_path('uploads'), $filename);
-            $userData['profile_picture'] = $filename;
+            $user->profile_picture = CustomHelper::uploadImage($request->file('profile_picture'));
+            $user->update();
         }
-        $userData['status'] = CustomHelper::NOTAPPROVE;
-        $userUpdate = User::where('id',$user->id)->update($userData);
+        $user_detail_data = $request->except(['first_name','last_name','email','token','password','subject_name']);
+        $userDetailUpdate = $user->userDetail()->update($user_detail_data);
 
-        $uDetails['address'] = isset($data['address']) ? $data['address'] : '';
-        $uDetails['current_school'] = isset($data['current_school']) ? $data['current_school'] : '';
-        $uDetails['previous_school'] = isset($data['previous_school']) ? $data['previous_school'] : '';
-        $uDetails['exp'] = isset($data['exp']) ? $data['exp'] : null;
-        $uDetails['father_name'] = isset($data['father_name']) ? $data['father_name'] : '';
-        $uDetails['mother_name'] = isset($data['mother_name']) ? $data['mother_name'] : '';
-
-        $userDetail = UserDetail::where('user_id',$user->id)->update($uDetails);
-
-        if(isset($data['subject_name']) && count($data['subject_name']) > 0){
-            $total_subs = count($data['subject_name']);
-            foreach($data['subject_name'] as $key =>  $sub){
-                $tSubject['subject_name'] = $sub;
-                TeacherSubject::where('user_id',$user->id)->update($tSubject);
+        if($request->has('subject_name') && count($request->input('subject_name')) > 0){
+            foreach($request->input('subject_name') as $key =>  $sub){
+                $user->teacherData()->update(['subject_name' => $sub]);
             }
         }
-        $userData = User::where('id',$user->id)->first();
-         //User created, return success response
-         return response()->json([
-            'success' => true,
-            'message' => 'User updated successfully',
-            'data' => $userData
+        $userUpdatedData = User::find($user->id);
+        return response()->json([
+           'success' => true,
+           'message' => 'User updated successfully',
+           'data' => $userUpdatedData
         ], Response::HTTP_OK);
     }
 
-    public function delete_user(Request $request){
+    public function delete_user(AuthenticateRequest $request){
 
-        $user = JWTAuth::authenticate($request->token);
+        $validate = $request->validated();
+        $user = JWTAuth::invalidate($request->token);
+        $user->userDetail()->delete();
+        $user->teacherData()->delete();
+        $user->delete();
 
-        UserDetail::where('user_id',$user->id)->delete();
-        TeacherSubject::where('user_id',$user->id)->delete();
-        User::where('id',$user->id)->delete();
         JWTAuth::invalidate($request->token);
 
         return response()->json([
@@ -211,22 +143,13 @@ class ApiController extends Controller
         ]);
     }
 
-    public function student_list(Request $request)
+    public function student_list(AuthenticateRequest $request)
     {
-        $data = $request->all();
-
+        $data = $request->validated();
         $user = JWTAuth::authenticate($data['token']);
-
-        $aRows = User::join('user_details','user_details.user_id','users.id')
-                        ->where('users.role_id','!=',CustomHelper::ADMIN)
-                        ->where('users.id','!=',$user->id)
-                        ->where('users.role_id','!=',CustomHelper::TEACHER);
-        if($user->role_id == CustomHelper::TEACHER){
-            $aRows = $aRows->where('users.role_id',CustomHelper::STUDENT)
-                            ->where('user_details.assigned_to',$user->id);
-        }
-
-        $aRows = $aRows->select('users.*','user_details.assigned_status','assigned_to','user_details.address')->get();
+        $aRows = User::with(['userDetail.teacherDetail'])
+                ->whereNotIn('role_id',[CustomHelper::ADMIN,CustomHelper::TEACHER])
+                ->get();
 
         return response()->json([
             'success' => true,
@@ -236,22 +159,13 @@ class ApiController extends Controller
 
     }
 
-    public function teacher_list(Request $request)
+    public function teacher_list(AuthenticateRequest $request)
     {
-        $data = $request->all();
-
+        $data = $request->validated();
         $user = JWTAuth::authenticate($data['token']);
-        $aRows = User::join('user_details','user_details.user_id','=','users.id')
-                ->where('users.id','!=',$user->id)
-                ->where('users.role_id',101)
-                ->select('users.*','user_details.address','user_details.current_school','user_details.previous_school','user_details.exp')
+        $aRows = User::with(['userDetail.teacherSubject'])
+                ->whereNotIn('role_id',[CustomHelper::ADMIN,CustomHelper::STUDENT])
                 ->get();
-
-        $data = array();
-        if($aRows){
-            $data = $aRows;
-        }
-
         return response()->json([
             'success' => true,
             'message' => 'Record Fetched Successfully',
@@ -260,16 +174,12 @@ class ApiController extends Controller
 
     }
 
-    public function approve_user(Request $request)
+    public function approve_user(AuthenticateRequest $request)
     {
-        $data = $request->all();
+        $data = $request->validated();
         $user = JWTAuth::authenticate($data['token']);
-
-        $id = $data['user_id'];
-        $status = $data['status'];
-        User::where('id',$id)->update(['status' => $status]);
-
-        $userData = User::where('id',$id)->first();
+        User::find('id',$request->input('id'))->update(['status' => $request->input('status')]);
+        $userData = User::find($request->input('id'));
 
         return response()->json([
             'success' => true,
@@ -278,16 +188,15 @@ class ApiController extends Controller
         ],Response::HTTP_OK);
     }
 
-    public function assign_teacher(Request $request)
+    public function assign_teacher(AuthenticateRequest $request)
     {
-        $data = $request->all();
-        $user = JWTAuth::authenticate($data['token']);
+        $data = $request->validated();
+        $authenticate = JWTAuth::authenticate($data['token']);
 
-        $uDetails['assigned_status'] = CustomHelper::ASSIGNED;
-        $uDetails['assigned_to'] = $data['assigned_to'];
-        UserDetail::where('user_id',$data['student_id'])->update($uDetails);
-        $teacher_data = User::where('id',$data['assigned_to'])->first();
-        $student = User::where('id',$data['student_id'])->first();
+        $user = User::find($request);
+        $user->userDetail()->update(['assigned_status' => CustomHelper::ASSIGNED,'assigned_to' => $request->input('assigned_to')]);
+        $teacher_data = User::find($request->input('assigned_to'));
+        $student = User::find($request->input('student_id'));
         $user_data['teacher_data'] = $teacher_data;
         $user_data['teacher_data']['student_fname'] = $student->first_name;
         $user_data['teacher_data']['student_lname'] = $student->last_name;
@@ -299,9 +208,9 @@ class ApiController extends Controller
         ],Response::HTTP_OK);
     }
 
-    public function verify_user(Request $request)
+    public function verify_user(AuthenticateRequest $request)
     {
-        $data = $request->all();
+        $data = $request->validated();
         $user = JWTAuth::authenticate($data['token']);
 
         if($user){

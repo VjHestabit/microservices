@@ -20,4 +20,12 @@ class UserDetail extends Model
         'assigned_status',
         'assigned_to'
     ];
+
+    public function teacherDetail(){
+        return $this->hasOne(User::class,'id','assigned_to');
+    }
+
+    public function teacherSubject(){
+        return $this->hasMany(TeacherSubject::class,'user_id','user_id');
+    }
 }

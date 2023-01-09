@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\ApiController;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -19,14 +18,20 @@ Route::post('login', [ApiController::class, 'authenticate']);
 Route::post('register', [ApiController::class, 'register']);
 
 Route::group(['middleware' => ['jwt.verify']], function() {
+
+    Route::post('verify_user',[ApiController::class,'verify_user']);
     Route::get('logout', [ApiController::class, 'logout']);
     Route::post('get_user', [ApiController::class, 'get_user']);
-    Route::post('update_user',[ApiController::class,'update_user']);
+    Route::put('update_user',[ApiController::class,'update_user']);
     Route::post('delete_user',[ApiController::class,'delete_user']);
 
-    Route::post('student_list',[ApiController::class,'student_list']);
-    Route::post('teacher_list',[ApiController::class,'teacher_list']);
-    Route::post('approve_user',[ApiController::class,'approve_user']);
-    Route::post('assign_teacher',[ApiController::class,'assign_teacher']);
-    Route::post('verify_user',[ApiController::class,'verify_user']);
+    Route::group(['middleware' => ['check_user_role:101']],function(){
+        Route::post('student_list',[ApiController::class,'student_list']);
+    });
+
+    Route::group(['middleware' => ['check_admin_role:999']], function(){
+        Route::post('teacher_list',[ApiController::class,'teacher_list']);
+        Route::post('approve_user',[ApiController::class,'approve_user']);
+        Route::post('assign_teacher',[ApiController::class,'assign_teacher']);
+    });
 });

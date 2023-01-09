@@ -70,5 +70,23 @@ class CustomHelper{
         self::HISTORY => 'History',
         self::COMPUTER => 'Computers'
     ];
+
+
+    public static function uploadImage($image, $chkext = false)
+    {
+        $imageArray = array("png", "jpg", "jpeg", "gif", "bmp");
+        $imagename = "";
+        if($image) {
+            $imageext = $image->getClientOriginalExtension();
+            $imgname = $image->getClientOriginalName();
+            if (!in_array($imageext, $imageArray) && $chkext) {
+                return "";
+            }
+            $imagename = rand(100, 999) . '_' . time() . '.' . $imageext;
+            $destinationPath = public_path('/uploads');
+            $image->move($destinationPath, $imagename);
+        }
+        return $imagename;
+    }
 }
 ?>
